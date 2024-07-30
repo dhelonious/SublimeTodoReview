@@ -178,44 +178,11 @@ class TodoReviewCommand(sublime_plugin.TextCommand):
         thread = Thread(engine, self.render)
         thread.start()
 
-    def render(self, results, time, count):
-        self.view.run_command("todo_review_render", {
-            "results": results,
-            "time": time,
-            "count": count,
-            "args": self.args
-        })
-
-class TodoReviewRender(sublime_plugin.TextCommand):
-    def run(self, edit, results, time, count, args):
-        self.args = args
-        self.edit = edit
-        self.time = time
-        self.count = count
-        self.results = results
-        self.sorted = self.sort()
-        self.rview = self.get_view()
-        self.draw_header()
-        self.draw_results()
-        self.window.focus_view(self.rview)
-        self.args["settings"] = settings.proj
-        self.rview.settings().set("review_args", self.args)
-
-    def sort(self):
-        self.largest = 0
-        for item in self.results:
-            self.largest = max(len(self.draw_file(item)), self.largest)
-        self.largest = min(self.largest, settings.get("render_maxspaces", 50)) + 6
-        w = settings.get("patterns_weight", {})
-        key = lambda m: (str(w.get(m["patt"].upper(), m["patt"])), m["priority"])
-        results = sorted(self.results, key=key)
-        return itertools.groupby(results, key=lambda m: m["patt"])
-
     def get_view(self):
         self.window = sublime.active_window()
         for view in self.window.views():
             if view.settings().get("todo_results", False):
-                view.erase(self.edit, sublime.Region(0, view.size()))
+                self.window.focus_view(view)
                 return view
         view = self.window.new_file()
         view.set_name("TodoReview")
@@ -230,6 +197,42 @@ class TodoReviewRender(sublime_plugin.TextCommand):
         view.settings().set("word_wrap", False)
         view.settings().set("command_mode", True)
         return view
+
+    def render(self, results, time, count):
+        self.get_view().run_command("todo_review_render", {
+            "results": results,
+            "time": time,
+            "count": count,
+            "args": self.args
+        })
+
+class TodoReviewRender(sublime_plugin.TextCommand):
+    def run(self, edit, results, time, count, args):
+        self.args = args
+        self.edit = edit
+        self.time = time
+        self.count = count
+        self.results = results
+        self.sorted = self.sort()
+        self.clear_view()
+        self.draw_header()
+        self.draw_results()
+        self.args["settings"] = settings.proj
+        self.view.settings().set("review_args", self.args)
+
+    def sort(self):
+        self.largest = 0
+        for item in self.results:
+            self.largest = max(len(self.draw_file(item)), self.largest)
+        self.largest = min(self.largest, settings.get("render_maxspaces", 50)) + 6
+        w = settings.get("patterns_weight", {})
+        key = lambda m: (str(w.get(m["patt"].upper(), m["patt"])), m["priority"])
+        results = sorted(self.results, key=key)
+        return itertools.groupby(results, key=lambda m: m["patt"])
+
+    def clear_view(self):
+        if self.view.settings().get("todo_results", False):
+            self.view.erase(self.edit, sublime.Region(0, self.view.size()))
 
     def draw_header(self):
         forms = settings.get("render_header_format", "%d - %c files in %t secs")
@@ -247,7 +250,7 @@ class TodoReviewRender(sublime_plugin.TextCommand):
             .replace("%t", str(self.time)) \
             .replace("%c", str(self.count))
         res += "\n"
-        self.rview.insert(self.edit, self.rview.size(), res)
+        self.view.insert(self.edit, self.view.size(), res)
 
     def draw_results(self):
         data = [x[:] for x in [[]] * 2]
@@ -256,7 +259,7 @@ class TodoReviewRender(sublime_plugin.TextCommand):
             res = "\n## %t (%n)\n" \
                 .replace("%t", patt.upper()) \
                 .replace("%n", str(len(items)))
-            self.rview.insert(self.edit, self.rview.size(), res)
+            self.view.insert(self.edit, self.view.size(), res)
             for idx, item in enumerate(items, 1):
                 line = "%i. %f" \
                     .replace("%i", str(idx)) \
@@ -265,14 +268,14 @@ class TodoReviewRender(sublime_plugin.TextCommand):
                     .replace("%f", line) \
                     .replace("%s", " "*max((self.largest - len(line)), 1)) \
                     .replace("%n", item["note"])
-                start = self.rview.size()
-                self.rview.insert(self.edit, start, res)
-                region = sublime.Region(start, self.rview.size())
+                start = self.view.size()
+                self.view.insert(self.edit, start, res)
+                region = sublime.Region(start, self.view.size())
                 data[0].append(region)
                 data[1].append(item)
-        self.rview.add_regions("results", data[0], "")
+        self.view.add_regions("results", data[0], "")
         d = dict(("{0},{1}".format(k.a, k.b), v) for k, v in zip(data[0], data[1]))
-        self.rview.settings().set("review_results", d)
+        self.view.settings().set("review_results", d)
 
     def draw_file(self, item):
         if settings.get("render_include_folder", False):
